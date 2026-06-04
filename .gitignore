@@ -21,6 +21,9 @@ logs/
 *.keras
 *.h5
 *.pt
+!aerial_project/models/custom_cnn_best.keras
+!aerial_project/models/tl_efficientnetb0_p1_best.keras
+!yolov8n.pt
 *.csv
 *.tfrecord
 *.tmp
