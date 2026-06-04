@@ -23,7 +23,6 @@ import numpy as np
 import streamlit as st
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-import cv2
 from pathlib import Path
 from PIL import Image
 
@@ -49,6 +48,19 @@ def load_tf():
 def load_keras_model_cached(path: str):
     tf = load_tf()
     return tf.keras.models.load_model(path)
+
+
+@st.cache_resource
+def load_cv2():
+    try:
+        import cv2
+        return cv2
+    except Exception as exc:
+        raise RuntimeError(
+            "OpenCV import failed on this deployment environment. "
+            "On Streamlit Community Cloud, ensure the repository includes "
+            "a root packages.txt with the required Linux libraries."
+        ) from exc
 
 
 # ─── Page
@@ -266,6 +278,7 @@ def get_gradcam(model, img_array: np.ndarray) -> np.ndarray | None:
 
 
 def heatmap_to_overlay(original_rgb: np.ndarray, heatmap: np.ndarray) -> np.ndarray:
+    cv2 = load_cv2()
     h, w = original_rgb.shape[:2]
     heat = cv2.resize(heatmap, (w, h))
     heat = np.uint8(255 * heat)
@@ -276,6 +289,7 @@ def heatmap_to_overlay(original_rgb: np.ndarray, heatmap: np.ndarray) -> np.ndar
 
 
 def draw_yolo_boxes(img_rgb: np.ndarray, detections: list) -> np.ndarray:
+    cv2 = load_cv2()
     COLORS = {"bird": (63, 185, 80), "drone": (248, 81, 73)}
     img = img_rgb.copy()
     for det in detections:
