@@ -22,9 +22,8 @@ import glob
 import numpy as np
 import streamlit as st
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageDraw
 
 # ── Allow imports from proje
 ROOT = Path(__file__).resolve().parent.parent
@@ -48,19 +47,6 @@ def load_tf():
 def load_keras_model_cached(path: str):
     tf = load_tf()
     return tf.keras.models.load_model(path)
-
-
-@st.cache_resource
-def load_cv2():
-    try:
-        import cv2
-        return cv2
-    except Exception as exc:
-        raise RuntimeError(
-            "OpenCV import failed on this deployment environment. "
-            "On Streamlit Community Cloud, ensure the repository includes "
-            "a root packages.txt with the required Linux libraries."
-        ) from exc
 
 
 # ─── Page
@@ -202,6 +188,7 @@ IMG_SIZE     = (224, 224)
 MODELS_DIR   = str(ROOT / "models")
 HISTORY_DIR  = str(ROOT / "models")
 YOLO_WEIGHTS_PATH = str((ROOT.parent / "yolov8n.pt").resolve())
+ENABLE_YOLO = os.getenv("AERIAL_ENABLE_YOLO", "false").lower() in {"1", "true", "yes"}
 
 CLASS_EMOJI  = {"bird": "🐦", "drone": "🚁"}
 CLASS_INFO   = {
@@ -278,32 +265,41 @@ def get_gradcam(model, img_array: np.ndarray) -> np.ndarray | None:
 
 
 def heatmap_to_overlay(original_rgb: np.ndarray, heatmap: np.ndarray) -> np.ndarray:
-    cv2 = load_cv2()
     h, w = original_rgb.shape[:2]
-    heat = cv2.resize(heatmap, (w, h))
-    heat = np.uint8(255 * heat)
-    heat_color = cv2.applyColorMap(heat, cv2.COLORMAP_JET)
-    heat_rgb   = cv2.cvtColor(heat_color, cv2.COLOR_BGR2RGB)
-    overlay    = cv2.addWeighted(original_rgb, 0.55, heat_rgb, 0.45, 0)
+    heat_img = Image.fromarray(np.uint8(np.clip(heatmap, 0, 1) * 255)).resize(
+        (w, h), Image.BILINEAR
+    )
+    heat_arr = np.array(heat_img, dtype=np.float32) / 255.0
+    heat_rgb = (plt.get_cmap("jet")(heat_arr)[..., :3] * 255.0).astype(np.float32)
+    overlay = np.clip(
+        original_rgb.astype(np.float32) * 0.55 + heat_rgb * 0.45,
+        0,
+        255,
+    ).astype(np.uint8)
     return overlay
 
 
 def draw_yolo_boxes(img_rgb: np.ndarray, detections: list) -> np.ndarray:
-    cv2 = load_cv2()
     COLORS = {"bird": (63, 185, 80), "drone": (248, 81, 73)}
-    img = img_rgb.copy()
+    img = Image.fromarray(img_rgb.copy())
+    draw = ImageDraw.Draw(img)
     for det in detections:
         x1, y1, x2, y2 = det["bbox"]
         cls   = det["class_name"]
         conf  = det["confidence"]
         color = COLORS.get(cls, (88, 166, 255))
-        cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
         label = f"{CLASS_EMOJI.get(cls,'')} {cls.upper()} {conf:.0%}"
-        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)
-        cv2.rectangle(img, (x1, y1 - th - 12), (x1 + tw + 8, y1), color, -1)
-        cv2.putText(img, label, (x1 + 4, y1 - 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
-    return img
+        draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
+        text_box = draw.textbbox((x1 + 4, max(0, y1 - 22)), label)
+        bg_box = [
+            text_box[0] - 4,
+            max(0, text_box[1] - 2),
+            text_box[2] + 4,
+            text_box[3] + 2,
+        ]
+        draw.rectangle(bg_box, fill=color)
+        draw.text((bg_box[0] + 4, bg_box[1] + 2), label, fill=(255, 255, 255))
+    return np.array(img)
 
 
 def load_comparison_csv():
@@ -358,8 +354,8 @@ with st.sidebar:
     threshold  = st.slider("Classification threshold", 0.3, 0.9, 0.5, 0.01)
     show_cam   = st.toggle("Show GradCAM overlay", value=True)
 
-    yolo_path  = find_yolo_weights()
-    yolo_conf  = st.slider("YOLO confidence", 0.1, 0.9, 0.25, 0.05)
+    yolo_path = find_yolo_weights() if ENABLE_YOLO else None
+    yolo_conf = st.slider("YOLO confidence", 0.1, 0.9, 0.25, 0.05) if ENABLE_YOLO else 0.25
 
     if yolo_path:
         st.success(f"✅ YOLO weights found: {yolo_path}")
@@ -373,6 +369,16 @@ with st.sidebar:
 
 
 # ─── Page: Classify ───────────────────────────────────────────────────────────
+
+if not ENABLE_YOLO:
+    yolo_path = None
+    yolo_conf = 0.25
+    if "Detect" in page:
+        st.warning(
+            "YOLO detection is disabled on this Streamlit Cloud deployment. "
+            "Use the classifier here, and deploy the full YOLO version on a heavier host."
+        )
+        st.stop()
 
 if "Classify" in page:
     st.markdown("<div class='hero-title'>🦅...🚁 Aerial Object Classifier</div>", unsafe_allow_html=True)
