@@ -382,7 +382,7 @@ if not ENABLE_YOLO:
 
 if "Classify" in page:
     st.markdown("<div class='hero-title'>🦅...🚁 Aerial Object Classifier</div>", unsafe_allow_html=True)
-    st.markdown("<div class='hero-sub'>Upload an aerial image — get an instant Bird or Drone prediction. Devolop by (Fahad).</div>", unsafe_allow_html=True)
+    st.markdown("<div class='hero-sub'>Upload an aerial image — get an instant Bird or Drone prediction. Develop by (Fahad).</div>", unsafe_allow_html=True)
 
     st.divider()
 
